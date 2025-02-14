@@ -1,17 +1,23 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os/exec"
+	"sync"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 	"github.com/isayme/go-logger"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/vmihailenco/msgpack/v5"
+)
+
+const (
+	TYPE_DATA   = 0
+	TYPE_RESIZE = 1
 )
 
 var upgrader = websocket.Upgrader{
@@ -47,7 +53,7 @@ func handleWebsocket(c echo.Context) error {
 	defer ws.Close()
 
 	shell := exec.Command("bash")
-	// shell.Env = append(os.Environ(), "TERM=xterm")
+	shell.Env = append(shell.Environ(), "TERM=xterm")
 
 	ptmx, err := pty.Start(shell)
 	if err != nil {
@@ -55,55 +61,64 @@ func handleWebsocket(c echo.Context) error {
 		return err
 	}
 
-	defer func() { _ = ptmx.Close() }() // Best effort.
-	// Copy stdin to the pty and the pty to stdout.
-	// NOTE: The goroutine will keep reading until the next keystroke before returning.
+	defer func() { ptmx.Close() }()
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
 	go func() {
+		defer wg.Done()
+
+		dataTypeBuf := make([]byte, 1)
+
 		for {
 			messageType, reader, err := ws.NextReader()
 			if err != nil {
-				logger.Errorf("Unable to grab next reader: %v", err)
+				logger.Errorf("unable to grab next reader: %v", err)
 				return
 			}
 
 			if messageType == websocket.TextMessage {
-				warnMsg := fmt.Sprintf("Unexpected text message: %d", messageType)
+				warnMsg := fmt.Sprintf("unexpected message type: %d", messageType)
 				logger.Warn(warnMsg)
-				ws.WriteMessage(websocket.TextMessage, []byte(warnMsg))
-				continue
+				return
 			}
 
-			dataTypeBuf := make([]byte, 1)
 			read, err := reader.Read(dataTypeBuf)
 			if err != nil {
-				errorMsg := fmt.Sprintf("Unable to read message type from reader: %v", err)
+				errorMsg := fmt.Sprintf("unable to read message type from reader: %v", err)
 				logger.Error(errorMsg)
-				ws.WriteMessage(websocket.TextMessage, []byte(errorMsg))
 				return
 			}
 
 			if read != 1 {
-				logger.Error("Unexpected number of bytes read")
+				logger.Error("read data type fail")
 				return
 			}
 
-			switch dataTypeBuf[0] {
-			case 0:
+			dataType := dataTypeBuf[0]
+			switch dataType {
+			case TYPE_DATA:
 				copied, err := io.Copy(ptmx, reader)
 				if err != nil {
 					logger.Errorf("Error after copying %d bytes, err: %v", copied, err)
-				} else {
-					logger.Infof("read %d bytes", copied)
 				}
-			case 1:
-				decoder := json.NewDecoder(reader)
-				resizeMessage := windowSize{}
-				err := decoder.Decode(&resizeMessage)
+			case TYPE_RESIZE:
+				resizeMsgBuf, err := io.ReadAll(reader)
 				if err != nil {
-					// ws.WriteMessage(websocket.TextMessage, []byte("Error decoding resize message: "+err.Error()))
+					logger.Warnf("Error decoding resize message: %v", err)
 					continue
 				}
-				logger.Infof("Resizing terminal: %v", resizeMessage)
+
+				resizeMessage := windowSize{}
+				err = msgpack.Unmarshal(resizeMsgBuf, &resizeMessage)
+				if err != nil {
+					logger.Warnf("Error msgpack.Unmarshal: %v", err)
+					continue
+				}
+
+				logger.Infof("Resizing terminal: %+v", resizeMessage)
+
 				winSize := &pty.Winsize{
 					Rows: resizeMessage.Rows,
 					Cols: resizeMessage.Cols,
@@ -117,26 +132,29 @@ func handleWebsocket(c echo.Context) error {
 		}
 	}()
 
-	for {
+	go func() {
+		defer wg.Done()
+
 		readBuf := make([]byte, 1024)
-		n, err := ptmx.Read(readBuf)
-		logger.Infof("ptmx.Read: n: %d, err: %v", n, err)
-		if n >= 0 {
-			for i := 0; i < n; i++ {
-				logger.Infof("ptmx.Read: %02x", readBuf[i])
+
+		for {
+			n, err := ptmx.Read(readBuf)
+			if n >= 0 {
+				err := ws.WriteMessage(websocket.BinaryMessage, readBuf[:n])
+				if err != nil {
+					logger.Errorf("receive error: %v", err)
+					break
+				}
 			}
-			err := ws.WriteMessage(websocket.BinaryMessage, readBuf[:n])
+
 			if err != nil {
-				logger.Errorf("receive error: %v", err)
+				logger.Errorf("read ptmx error: %v", err)
 				break
 			}
 		}
+	}()
 
-		if err != nil {
-			logger.Errorf("read ptmx error: %v", err)
-			break
-		}
-	}
+	wg.Wait()
 
 	return nil
 }
