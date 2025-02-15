@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"sync"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/vmihailenco/msgpack/v5"
 )
+
+var ttyCmd = "sh"
 
 const (
 	TYPE_DATA   = 0
@@ -34,6 +37,11 @@ type windowSize struct {
 }
 
 func main() {
+	envCmd := os.Getenv("TTYD_CMD")
+	if envCmd != "" {
+		ttyCmd = envCmd
+	}
+
 	e := echo.New()
 
 	e.Use(middleware.Logger())
@@ -52,7 +60,7 @@ func handleWebsocket(c echo.Context) error {
 	}
 	defer ws.Close()
 
-	shell := exec.Command("bash")
+	shell := exec.Command("sh", "-c", ttyCmd)
 	shell.Env = append(shell.Environ(), "TERM=xterm")
 
 	ptmx, err := pty.Start(shell)
@@ -74,7 +82,9 @@ func handleWebsocket(c echo.Context) error {
 		for {
 			messageType, reader, err := ws.NextReader()
 			if err != nil {
-				logger.Errorf("unable to grab next reader: %v", err)
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					logger.Errorf("unable to grab next reader: %v", err)
+				}
 				return
 			}
 
@@ -101,23 +111,24 @@ func handleWebsocket(c echo.Context) error {
 			case TYPE_DATA:
 				copied, err := io.Copy(ptmx, reader)
 				if err != nil {
-					logger.Errorf("Error after copying %d bytes, err: %v", copied, err)
+					logger.Errorf("error after copying %d bytes, err: %v", copied, err)
+					return
 				}
 			case TYPE_RESIZE:
 				resizeMsgBuf, err := io.ReadAll(reader)
 				if err != nil {
-					logger.Warnf("Error decoding resize message: %v", err)
+					logger.Warnf("error decoding resize message: %v", err)
 					continue
 				}
 
 				resizeMessage := windowSize{}
 				err = msgpack.Unmarshal(resizeMsgBuf, &resizeMessage)
 				if err != nil {
-					logger.Warnf("Error msgpack.Unmarshal: %v", err)
+					logger.Warnf("error msgpack.Unmarshal: %v", err)
 					continue
 				}
 
-				logger.Infof("Resizing terminal: %+v", resizeMessage)
+				logger.Infof("resizing terminal: %+v", resizeMessage)
 
 				winSize := &pty.Winsize{
 					Rows: resizeMessage.Rows,
@@ -127,7 +138,7 @@ func handleWebsocket(c echo.Context) error {
 				}
 				pty.Setsize(ptmx, winSize)
 			default:
-				logger.Errorf("Unknown data type: %d", dataTypeBuf[0])
+				logger.Errorf("unknown data type: %d", dataTypeBuf[0])
 			}
 		}
 	}()
@@ -148,7 +159,9 @@ func handleWebsocket(c echo.Context) error {
 			}
 
 			if err != nil {
-				logger.Errorf("read ptmx error: %v", err)
+				if err != io.EOF {
+					logger.Errorf("read ptmx error: %v", err)
+				}
 				break
 			}
 		}
