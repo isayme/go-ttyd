@@ -5,7 +5,7 @@ COPY ./server .
 RUN mkdir -p ./dist && GO111MODULE=on go mod download
 RUN go build -o ./dist/ttyd main.go
 
-FROM node:22-alpine AS web-builder
+FROM node:22-slim AS web-builder
 WORKDIR /app
 
 COPY ./web/package.json ./
