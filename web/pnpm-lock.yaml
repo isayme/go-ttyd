@@ -18,8 +18,8 @@ dependencies:
     specifier: ^5.5.0
     version: 5.5.0
   debounce:
-    specifier: ^2.2.0
-    version: 2.2.0
+    specifier: ^3.0.0
+    version: 3.0.0
   msgpackr:
     specifier: ^1.11.2
     version: 1.11.2
@@ -489,9 +489,9 @@ packages:
     resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
     dev: false
 
-  /debounce@2.2.0:
-    resolution: {integrity: sha512-Xks6RUDLZFdz8LIdR6q0MTH44k7FikOmnh5xkSjMig6ch45afc8sjTjRQf3P6ax8dMgcQrYO/AR2RGWURrruqw==}
-    engines: {node: '>=18'}
+  /debounce@3.0.0:
+    resolution: {integrity: sha512-64byRbF0/AirwbuHqB3/ZpMG9/nckDa6ZA0yd6UnaQNwbbemCOwvz2sL5sjXLHhZHADyiwLm0M5qMhltUUx+TA==}
+    engines: {node: '>=20'}
     dev: false
 
   /detect-libc@2.0.3:
