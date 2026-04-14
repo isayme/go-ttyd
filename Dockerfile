@@ -10,7 +10,7 @@ WORKDIR /app
 
 COPY ./web/package.json ./
 COPY ./web/pnpm-lock.yaml ./
-RUN npm install -g pnpm && pnpm install
+RUN npm install -g pnpm@10 && pnpm install
 COPY ./web .
 RUN ls && pnpm build
 
