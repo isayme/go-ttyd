@@ -1,11 +1,11 @@
-FROM golang:1.23-alpine as server-builder
+FROM golang:1.26-alpine AS server-builder
 WORKDIR /app
 
 COPY ./server .
 RUN mkdir -p ./dist && GO111MODULE=on go mod download
 RUN go build -o ./dist/ttyd main.go
 
-FROM node:22-alpine as web-builder
+FROM node:22-alpine AS web-builder
 WORKDIR /app
 
 COPY ./web/package.json ./
@@ -18,9 +18,9 @@ FROM alpine
 WORKDIR /app
 
 ARG APP_NAME
-ENV APP_NAME ${APP_NAME}
+ENV APP_NAME=${APP_NAME}
 ARG APP_VERSION
-ENV APP_VERSION ${APP_VERSION}
+ENV APP_VERSION=${APP_VERSION}
 
 RUN mkdir public
 RUN apk --no-cache add openssh-client
